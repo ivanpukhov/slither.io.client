@@ -38,103 +38,102 @@ export function useConnection({ controller }: UseConnectionOptions) {
   useEffect(() => closeConnection, [closeConnection])
 
   const connect = useCallback(
-    (name: string, skin: string, betAmount: number | null) => {
-      closeConnection()
-      controller.setNicknameVisible(false)
-      controller.setPendingBet(betAmount)
-      controller.setAlive(false)
-      const origin =
-        typeof location !== 'undefined' && location.origin && location.origin !== 'null'
-          ? location.origin.replace(/^http/, 'ws')
-          : 'ws://localhost:8080'
-      const ws = new WebSocket(origin)
-      wsRef.current = ws
-      setStatus('connecting')
-
-      ws.onopen = () => {
-        setStatus('connected')
-        ws.send(JSON.stringify({ type: 'join', name, skin }))
-      }
-
-      ws.onclose = () => {
-        setStatus('idle')
+      (name: string, skin: string, betAmount: number | null) => {
+        closeConnection()
+        controller.setNicknameVisible(false)
+        controller.setPendingBet(betAmount)
         controller.setAlive(false)
-        controller.setCashoutPending(false)
-      }
+        const origin = 'ws://localhost:8080'
 
-      ws.onmessage = (event) => {
-        const message = safeParse<any>(event.data)
-        if (!message) return
-        if (message.type === 'welcome') {
-          if (message.id) controller.setMe(message.id, name)
-          controller.setAlive(true)
-          controller.setCashoutPending(false)
-          controller.applyBalanceUpdate({
-            balance: typeof message.balance === 'number' ? message.balance : controller.getAccount().balance,
-            currentBet:
-              typeof message.currentBet === 'number' ? message.currentBet : controller.getAccount().currentBet,
-            total:
-              typeof message.balance === 'number' && typeof message.currentBet === 'number'
-                ? message.balance + message.currentBet
-                : undefined,
-            cashedOut: false
-          })
-          if (typeof message.width === 'number' && typeof message.height === 'number') {
-            const radius = typeof message.radius === 'number' ? message.radius : Math.min(message.width, message.height) / 2
-            controller.setWorld({
-              width: message.width,
-              height: message.height,
-              radius,
-              centerX: message.width / 2,
-              centerY: message.height / 2
-            })
-          }
-          if (typeof message.minLength === 'number') {
-            controller.setLimits({ minLength: message.minLength, boostMinLength: message.minLength })
-          }
-          if (typeof message.baseLength === 'number') {
-            controller.setLimits({ baseLength: message.baseLength })
-          }
-          controller.refreshBoostState(true)
-          const pendingBet = controller.getPendingBet()
-          if (pendingBet !== null && ws.readyState === WebSocket.OPEN) {
-            const desired = sanitizeBetValue(pendingBet, controller.getAccount().balance)
-            if (desired > 0) {
-              ws.send(JSON.stringify({ type: 'set_bet', amount: desired }))
-            }
-            controller.setPendingBet(null)
-          }
+
+        const ws = new WebSocket(origin)
+        wsRef.current = ws
+        setStatus('connecting')
+
+        ws.onopen = () => {
+          setStatus('connected')
+          ws.send(JSON.stringify({ type: 'join', name, skin }))
         }
-        if (message.type === 'snapshot') {
-          controller.state.lastSnapshotAt = performance.now()
-          if (Array.isArray(message.leaderboard)) {
-            controller.updateLeaderboard(message.leaderboard)
-          }
-          if (message.you && (typeof message.you.balance === 'number' || typeof message.you.currentBet === 'number')) {
+
+        ws.onclose = () => {
+          setStatus('idle')
+          controller.setAlive(false)
+          controller.setCashoutPending(false)
+        }
+
+        ws.onmessage = (event) => {
+          const message = safeParse<any>(event.data)
+          if (!message) return
+          if (message.type === 'welcome') {
+            if (message.id) controller.setMe(message.id, name)
+            controller.setAlive(true)
+            controller.setCashoutPending(false)
             controller.applyBalanceUpdate({
-              balance: message.you.balance,
-              currentBet: message.you.currentBet,
-              total: message.you.totalBalance
+              balance: typeof message.balance === 'number' ? message.balance : controller.getAccount().balance,
+              currentBet:
+                  typeof message.currentBet === 'number' ? message.currentBet : controller.getAccount().currentBet,
+              total:
+                  typeof message.balance === 'number' && typeof message.currentBet === 'number'
+                      ? message.balance + message.currentBet
+                      : undefined,
+              cashedOut: false
             })
+            if (typeof message.width === 'number' && typeof message.height === 'number') {
+              const radius = typeof message.radius === 'number' ? message.radius : Math.min(message.width, message.height) / 2
+              controller.setWorld({
+                width: message.width,
+                height: message.height,
+                radius,
+                centerX: message.width / 2,
+                centerY: message.height / 2
+              })
+            }
+            if (typeof message.minLength === 'number') {
+              controller.setLimits({ minLength: message.minLength, boostMinLength: message.minLength })
+            }
+            if (typeof message.baseLength === 'number') {
+              controller.setLimits({ baseLength: message.baseLength })
+            }
+            controller.refreshBoostState(true)
+            const pendingBet = controller.getPendingBet()
+            if (pendingBet !== null && ws.readyState === WebSocket.OPEN) {
+              const desired = sanitizeBetValue(pendingBet, controller.getAccount().balance)
+              if (desired > 0) {
+                ws.send(JSON.stringify({ type: 'set_bet', amount: desired }))
+              }
+              controller.setPendingBet(null)
+            }
           }
-          controller.applySnapshot(message)
+          if (message.type === 'snapshot') {
+            controller.state.lastSnapshotAt = performance.now()
+            if (Array.isArray(message.leaderboard)) {
+              controller.updateLeaderboard(message.leaderboard)
+            }
+            if (message.you && (typeof message.you.balance === 'number' || typeof message.you.currentBet === 'number')) {
+              controller.applyBalanceUpdate({
+                balance: message.you.balance,
+                currentBet: message.you.currentBet,
+                total: message.you.totalBalance
+              })
+            }
+            controller.applySnapshot(message)
+          }
+          if (message.type === 'death') {
+            controller.showDeath(message)
+          }
+          if (message.type === 'balance') {
+            controller.applyBalanceUpdate(message)
+          }
+          if (message.type === 'cashout_confirmed') {
+            controller.showCashout(message.balance)
+          }
+          if (message.type === 'error' && message.code === 'cashout_failed') {
+            controller.setCashoutPending(false)
+            controller.resetCashoutHold()
+          }
         }
-        if (message.type === 'death') {
-          controller.showDeath(message)
-        }
-        if (message.type === 'balance') {
-          controller.applyBalanceUpdate(message)
-        }
-        if (message.type === 'cashout_confirmed') {
-          controller.showCashout(message.balance)
-        }
-        if (message.type === 'error' && message.code === 'cashout_failed') {
-          controller.setCashoutPending(false)
-          controller.resetCashoutHold()
-        }
-      }
-    },
-    [closeConnection, controller]
+      },
+      [closeConnection, controller]
   )
 
   const requestRespawn = useCallback((betAmount: number) => {
